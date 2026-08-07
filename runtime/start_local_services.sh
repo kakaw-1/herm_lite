@@ -59,10 +59,11 @@ start_dashboard() {
         while true; do
             log_local "启动 Hermes Dashboard：http://127.0.0.1:${HERMES_DASHBOARD_PORT}"
             hermes dashboard \
-                --host 127.0.0.1 \
+                --host 0.0.0.0 \
                 --port "$HERMES_DASHBOARD_PORT" \
                 --no-open \
-                --skip-build
+                --skip-build \
+                --insecure
             rc=$?
             log_local "Hermes Dashboard 退出 (code=$rc)，5 秒后重启。"
             sleep 5
