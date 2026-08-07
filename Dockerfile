@@ -16,17 +16,7 @@ WORKDIR /opt/hermes
 # ============================================================
 # 系统依赖
 # ============================================================
-#
-# rclone          备份/恢复
-# inotify-tools   实时监控
-# gnupg           远程备份加密
-# build-essential SQLite 编译
-# sudo            Web Shell 用户提权
-# procps          ps 等调试工具
-# ripgrep         Hermes 工具
-#
-# 已不再使用 openssh-server。
-# ============================================================
+
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -62,10 +52,6 @@ RUN curl -fL --retry 3 \
 # Hermes 需要：
 # - SQLite >= 3.51.3
 # - FTS5
-#
-# 否则会出现：
-# - WAL-reset warning
-# - SQLite FTS5 unavailable
 # ============================================================
 
 ARG SQLITE_VERSION=3530400
@@ -218,14 +204,6 @@ RUN curl -fsSL \
 # ============================================================
 # Hermes Dashboard 前端预构建
 #
-# 这样 ModelScope 启动时无需现场 npm build。
-# runtime/start_local_services.sh 可使用：
-#
-# hermes dashboard \
-#     --host 127.0.0.1 \
-#     --port "$HERMES_DASHBOARD_PORT" \
-#     --no-open \
-#     --skip-build
 # ============================================================
 
 WORKDIR /opt/hermes
@@ -284,18 +262,6 @@ RUN chmod +x \
 
 # ============================================================
 # Ports
-# ============================================================
-#
-# ModelScope:
-#   7860 = Health / Status
-#
-# Loopback only:
-#   2222 = ttyd Web Shell
-#   8642 = Hermes Gateway API
-#   9110 = Hermes Dashboard
-#
-# Cloudflare Tunnel 主动出站连接，
-# 无需 ModelScope 额外公开这些端口。
 # ============================================================
 
 EXPOSE 7860
