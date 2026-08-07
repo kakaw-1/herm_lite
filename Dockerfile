@@ -66,7 +66,7 @@ COPY remote-access/ /remote-access/
 COPY entrypoint.sh /entrypoint.sh
 
 RUN chmod +x \
-      /bz/auto_recover.sh /bz/sync_init.sh /bz/sync_daemon.sh \
+      /bz/sync_init.sh /bz/sync_daemon.sh \
       /root/bz-startup/main.sh \
       /health/health_server.py \
       /runtime/start_local_services.sh \
