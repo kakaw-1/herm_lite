@@ -311,16 +311,13 @@ button:hover {{
 
 <h1>hello world</h1>
 
-<p>
-此页面受密码保护，请输入密码查看服务状态。
-</p>
 
 {error_html}
 
 <form method="post" action="/login">
 
 <label for="password">
-访问密码：
+访问：
 </label>
 
 <input
