@@ -30,6 +30,21 @@ RUN curl -fL --retry 3 \
     && chmod 0755 /usr/local/bin/ttyd \
     && ttyd --version
 
+ARG SQLITE_VERSION=3530400
+RUN curl -fL --retry 3 \
+    "https://www.sqlite.org/2026/sqlite-autoconf-${SQLITE_VERSION}.tar.gz" \
+    -o /tmp/sqlite.tar.gz \
+    && mkdir -p /tmp/sqlite-src \
+    && tar -xzf /tmp/sqlite.tar.gz \
+        -C /tmp/sqlite-src \
+        --strip-components=1 \
+    && cd /tmp/sqlite-src \
+    && ./configure --prefix=/usr/local \
+    && make -j"$(nproc)" \
+    && make install \
+    && ldconfig \
+    && rm -rf /tmp/sqlite.tar.gz /tmp/sqlite-src
+    
 # ---------- 安装 cloudflared（固定官方已发布版本 + SHA256 校验） ----------
 RUN curl -fL --retry 3 \
     https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
