@@ -61,7 +61,8 @@ start_dashboard() {
             hermes dashboard \
                 --host 127.0.0.1 \
                 --port "$HERMES_DASHBOARD_PORT" \
-                --no-open
+                --no-open \
+                --skip-build
             rc=$?
             log_local "Hermes Dashboard 退出 (code=$rc)，5 秒后重启。"
             sleep 5
