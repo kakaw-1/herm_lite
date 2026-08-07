@@ -86,10 +86,15 @@ def state() -> dict:
                 "address": f"127.0.0.1:{DASHBOARD_PORT}",
                 "reachable": tcp_open("127.0.0.1", DASHBOARD_PORT),
             },
-            "ssh": {
-                "enabled": os.getenv("REMOTE_SSH_CONFIGURED", "0") == "1",
-                "address": f"127.0.0.1:{SSH_PORT}",
-                "reachable": tcp_open("127.0.0.1", SSH_PORT),
+            "web_shell": {
+                "enabled": os.getenv(
+                    "REMOTE_WEB_SHELL_CONFIGURED", "0"
+                ) == "1",
+                "address": f"127.0.0.1:{WEB_SHELL_PORT}",
+                "reachable": tcp_open(
+                    "127.0.0.1",
+                    WEB_SHELL_PORT
+                ),
             },
             "cloudflare_tunnel": {
                 "configured": os.getenv("REMOTE_CF_TUNNEL_CONFIGURED", "0") == "1",
