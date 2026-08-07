@@ -50,6 +50,20 @@ RUN git init . \
     && git checkout --detach FETCH_HEAD \
     && uv sync --frozen --no-install-project --extra all --extra messaging \
     && uv pip install --no-cache-dir --no-deps -e .
+    
+# 安装 Node.js 22
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && node --version \
+    && npm --version
+
+# Hermes Dashboard 前端预构建
+WORKDIR /opt/hermes
+RUN cd web \
+    && npm install \
+    && npm run build
 
 # ---------- 原有备份/恢复机制 ----------
 COPY bz/ /bz/
