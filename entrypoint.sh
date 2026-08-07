@@ -14,7 +14,7 @@ export API_SERVER_HOST="127.0.0.1"
 export API_SERVER_PORT="${API_SERVER_PORT:-8642}"
 export HERMES_DASHBOARD_HOST="127.0.0.1"
 export HERMES_DASHBOARD_PORT="${HERMES_DASHBOARD_PORT:-9119}"
-export SSH_PORT="${SSH_PORT:-2222}"
+export WEB_SHELL_PORT="${WEB_SHELL_PORT:-2222}"
 # 本项目保留原 /root/.hermes 持久化语义，因此 Gateway 仍以 root 运行。
 export HERMES_ALLOW_ROOT_GATEWAY="${HERMES_ALLOW_ROOT_GATEWAY:-1}"
 
@@ -39,7 +39,12 @@ fi
 source /remote-access/start_remote_access.sh
 
 # 远程访问子进程已经拿到最小化环境副本；从后续 Dashboard / Health / Hermes 环境移除远程凭证。
-unset SSH_PASSWORD CF_TUNNEL_TOKEN TUNNEL_TOKEN || true
+unset \
+    WEB_SHELL_PASSWORD \
+    WEB_SHELL_HTTP_PASSWORD \
+    CF_TUNNEL_TOKEN \
+    TUNNEL_TOKEN \
+    || true
 
 # 4) Hermes Gateway API 默认关闭（API_SERVER_ENABLED 默认 false）。
 #    若用户显式开启且未给固定 key，则生成一次性随机 key。
