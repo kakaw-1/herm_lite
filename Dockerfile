@@ -182,7 +182,8 @@ RUN git init . \
         --no-deps \
         -e .
 
-
+# 让普通 Web Shell 用户和 root 都能直接执行
+RUN ln -sf /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes
 # ============================================================
 # Node.js 22
 #
