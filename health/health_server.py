@@ -309,7 +309,7 @@ button:hover {{
 
 <body>
 
-<h1>Hermes Lite 状态页</h1>
+<h1>hello world</h1>
 
 <p>
 此页面受密码保护，请输入密码查看服务状态。
