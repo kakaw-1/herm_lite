@@ -44,6 +44,13 @@ RUN curl -fL --retry 3 \
     && make install \
     && ldconfig \
     && rm -rf /tmp/sqlite.tar.gz /tmp/sqlite-src
+
+RUN python - <<'PY'
+import sqlite3
+print("Linked SQLite:", sqlite3.sqlite_version)
+major = tuple(map(int, sqlite3.sqlite_version.split(".")))
+assert major >= (3, 51, 3), sqlite3.sqlite_version
+PY
     
 # ---------- 安装 cloudflared（固定官方已发布版本 + SHA256 校验） ----------
 RUN curl -fL --retry 3 \
