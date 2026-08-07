@@ -1,0 +1,7 @@
+/root/.openclaw
+/root/Desktop
+/root/.zsh_history
+/root/.codex
+/root/.claude
+/root/bz-startup
+/root/.hermes

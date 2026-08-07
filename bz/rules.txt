@@ -1,0 +1,19 @@
+# 优先排除的目录
+- /.hermes/hermes-agent/**
+- .git/**
+- .venv/**
+- venv/**
+- node_modules/**
+# 需要同步的目录
++ /.openclaw/**
++ /Desktop/**
++ /.codex/**
++ /.claude/**
++ /bz-startup/**
++ /.hermes/**
+
+# 需要同步的文件
++ /.zsh_history
+
+# 排除其余所有
+- *

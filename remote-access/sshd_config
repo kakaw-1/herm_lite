@@ -1,0 +1,17 @@
+# Hermes Lite - Cloudflare Browser-rendered SSH origin
+# Port and ListenAddress are appended dynamically at container startup.
+Protocol 2
+PermitRootLogin no
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+UsePAM yes
+X11Forwarding no
+AllowTcpForwarding no
+AllowAgentForwarding no
+GatewayPorts no
+PermitTunnel no
+PrintMotd no
+ClientAliveInterval 120
+ClientAliveCountMax 2
+Subsystem sftp internal-sftp
