@@ -120,6 +120,7 @@ start_web_shell() {
             log "启动 ttyd：127.0.0.1:${WEB_SHELL_PORT}"
 
             ttyd \
+                -d 3 \
                 -W \
                 -i 127.0.0.1 \
                 -p "$WEB_SHELL_PORT" \
