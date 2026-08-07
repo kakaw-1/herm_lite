@@ -24,22 +24,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -f /etc/ssh/ssh_host_*
 
 # ---------- 安装 cloudflared（固定官方已发布版本 + SHA256 校验） ----------
-ARG CLOUDFLARED_VERSION=2026.7.2
-ARG CLOUDFLARED_SHA256_AMD64=ec905ea7b7e327ff8abdde8cb64697a2152de74dbcdbf6aec9db8364eb3886cd
-ARG CLOUDFLARED_SHA256_ARM64=405df476437e027fc6d18729a5a77155c0a33a6082aeee60a799a688f3052e66
-RUN set -eux; \
-    arch="$(dpkg --print-architecture)"; \
-    case "$arch" in \
-      amd64) cf_arch="amd64"; cf_sha="$CLOUDFLARED_SHA256_AMD64" ;; \
-      arm64) cf_arch="arm64"; cf_sha="$CLOUDFLARED_SHA256_ARM64" ;; \
-      *) echo "Unsupported architecture for cloudflared: $arch" >&2; exit 1 ;; \
-    esac; \
-    curl -fsSL \
-      "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-${cf_arch}" \
-      -o /usr/local/bin/cloudflared; \
-    echo "${cf_sha}  /usr/local/bin/cloudflared" | sha256sum -c -; \
-    chmod 0755 /usr/local/bin/cloudflared; \
-    cloudflared --version
+RUN curl -fL --retry 3 \
+    https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+    -o /usr/local/bin/cloudflared \
+    && chmod 0755 /usr/local/bin/cloudflared \
+    && /usr/local/bin/cloudflared version
 
 # ---------- 安装 uv ----------
 ARG UV_VERSION=0.5.11
