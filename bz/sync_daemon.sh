@@ -27,7 +27,7 @@ fi
                 echo "$(date '+%Y-%m-%d %H:%M:%S') 执行每日 S3 远程备份..."
                 rclone sync /root/ /tmp/root/ \
                     --filter-from /bz/rules.txt --delete-excluded \
-                    --create-empty-src-dirs --links --ignore-errors --metadata
+                    --create-empty-src-dirs --links --ignore-errors
                 if [ -n "${BACKUP_ENC_PASS}" ]; then
                     tar -zcPf - /tmp/root | gpg --batch --yes --passphrase "$BACKUP_ENC_PASS" --symmetric --cipher-algo AES256 -o /tmp/data.tar.gz
                 else
