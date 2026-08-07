@@ -45,7 +45,6 @@ restore_workspace() {
         /mnt/workspace/root/ \
         /root/ \
         --links \
-        --metadata
     then
         echo "错误：Workspace 恢复失败"
         return 1
