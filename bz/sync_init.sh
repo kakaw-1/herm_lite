@@ -44,7 +44,7 @@ restore_workspace() {
     if ! rclone copy \
         /mnt/workspace/root/ \
         /root/ \
-        --links \
+        --links
     then
         echo "错误：Workspace 恢复失败"
         return 1
