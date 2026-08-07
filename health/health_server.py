@@ -23,7 +23,7 @@ from urllib.parse import parse_qs
 
 HOST = os.getenv("HEALTH_HOST", "0.0.0.0")
 PORT = int(os.getenv("HEALTH_PORT", "7860"))
-SSH_PORT = int(os.getenv("SSH_PORT", "2222"))
+SSH_PORT = int(os.getenv("WEB_SHELL_PORT", "2222"))
 GATEWAY_PORT = int(os.getenv("API_SERVER_PORT", "8642"))
 DASHBOARD_PORT = int(os.getenv("HERMES_DASHBOARD_PORT", "9119"))
 
