@@ -18,10 +18,17 @@ WORKDIR /opt/hermes
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git ripgrep procps \
     rclone inotify-tools gnupg build-essential \
-    openssh-server sudo \
+    sudo \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /run/sshd /etc/ssh/sshd_config.d \
+    && mkdir -p /run/sshd /etc/ssh \
     && rm -f /etc/ssh/ssh_host_*
+
+ARG TTYD_VERSION=1.7.7
+RUN curl -fL --retry 3 \
+    "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64" \
+    -o /usr/local/bin/ttyd \
+    && chmod 0755 /usr/local/bin/ttyd \
+    && ttyd --version
 
 # ---------- 安装 cloudflared（固定官方已发布版本 + SHA256 校验） ----------
 RUN curl -fL --retry 3 \
