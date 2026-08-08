@@ -1,6 +1,5 @@
 #!/bin/bash
 
-set -u
 
 
 # ============================================================
@@ -8,7 +7,9 @@ set -u
 # ============================================================
 
 log_local() {
+
     printf '[local-services] %s\n' "$*"
+
 }
 
 
@@ -29,6 +30,7 @@ is_true() {
             ;;
 
     esac
+
 }
 
 
@@ -49,6 +51,7 @@ valid_port() {
 
     [ "$1" -ge 1 ] \
         && [ "$1" -le 65535 ]
+
 }
 
 
@@ -58,71 +61,80 @@ valid_port() {
 
 start_dashboard() {
 
+
     # --------------------------------------------------------
     # Dashboard 默认关闭
     # --------------------------------------------------------
 
     if ! is_true "${HERMES_DASHBOARD:-0}"; then
 
-        log_local \
-            "HERMES_DASHBOARD 未启用，跳过 Dashboard。"
+        log_local "HERMES_DASHBOARD 未启用，跳过 Dashboard。"
 
         return 0
+
     fi
 
 
     # --------------------------------------------------------
-    # Dashboard 仅用于本机 / Cloudflare Tunnel
+    # Dashboard 绑定
     # --------------------------------------------------------
 
     export HERMES_DASHBOARD_HOST="127.0.0.1"
 
-    export HERMES_DASHBOARD_PORT="${
-        HERMES_DASHBOARD_PORT:-9119
-    }"
+
+    # 如果环境变量：
+    #
+    # HERMES_DASHBOARD_PORT=9110
+    #
+    # 那么这里就是 9110。
+    #
+    # 只有没设置环境变量时才使用 9119。
+    export HERMES_DASHBOARD_PORT="${HERMES_DASHBOARD_PORT:-9119}"
 
 
     # --------------------------------------------------------
-    # 端口检查
+    # 端口合法性检查
     # --------------------------------------------------------
 
     if ! valid_port "$HERMES_DASHBOARD_PORT"; then
 
-        log_local \
-            "错误：HERMES_DASHBOARD_PORT 必须是 1-65535 的整数。"
+        log_local "错误：HERMES_DASHBOARD_PORT 必须是 1-65535 的整数。"
 
         return 1
+
     fi
 
 
     # --------------------------------------------------------
-    # 避免抢占 ModelScope :7860
+    # Dashboard 不能和 Health 抢端口
     # --------------------------------------------------------
 
     if [ "$HERMES_DASHBOARD_PORT" = "${HEALTH_PORT:-7860}" ]; then
 
-        log_local \
-            "错误：Dashboard 端口不能与 HEALTH_PORT 相同。"
+        log_local "错误：Dashboard 端口不能与 HEALTH_PORT 相同。"
 
         return 1
+
     fi
 
 
     # --------------------------------------------------------
-    # Dashboard supervisor
+    # Dashboard Supervisor
     # --------------------------------------------------------
     #
-    # Dashboard 本身不是容器主服务，
-    # 所以保持后台 watchdog 模式即可。
+    # Dashboard 不决定容器生命周期。
+    #
+    # Dashboard 自己退出后，
+    # 5 秒后自动拉起。
     # --------------------------------------------------------
 
     (
 
         while true; do
 
+
             log_local \
-                "启动 Hermes Dashboard：" \
-                "http://127.0.0.1:${HERMES_DASHBOARD_PORT}"
+                "启动 Hermes Dashboard：http://127.0.0.1:${HERMES_DASHBOARD_PORT}"
 
 
             if hermes dashboard \
@@ -132,15 +144,18 @@ start_dashboard() {
                 --skip-build \
                 --insecure
             then
+
                 rc=0
+
             else
+
                 rc=$?
+
             fi
 
 
             log_local \
-                "Hermes Dashboard 退出 " \
-                "(code=$rc)，5 秒后重启。"
+                "Hermes Dashboard 退出 (code=$rc)，5 秒后重启。"
 
 
             sleep 5
@@ -149,15 +164,21 @@ start_dashboard() {
 
     ) >>/tmp/hermes-dashboard.log 2>&1 &
 
+
+    return 0
 }
 
 
+# ============================================================
+# Startup
 
-start_dashboard \
-    || return 1 2>/dev/null \
-    || exit 1
+
+if ! start_dashboard; then
+
+    return 1 2>/dev/null || exit 1
+
+fi
 
 
 log_local \
-    "本地服务初始化完成。" \
-    "Dashboard 日志：/tmp/hermes-dashboard.log"
+    "本地服务初始化完成。Dashboard 日志：/tmp/hermes-dashboard.log"
