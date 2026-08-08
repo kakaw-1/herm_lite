@@ -1,5 +1,6 @@
 #!/bin/bash
-# Hermes Lite entrypoint - ModelScope health + persistence + Cloudflare remote access
+# Hermes Lite entrypoint
+# Gateway 只在容器启动时启动一次，不做自动重启。
 
 set -e
 
@@ -11,7 +12,7 @@ export LC_ALL="${LC_ALL:-C.UTF-8}"
 # 基础配置
 # ============================================================
 
-# ModelScope 对外健康检查 / 状态页
+# ModelScope Health / 状态页
 export HEALTH_HOST="0.0.0.0"
 export HEALTH_PORT="${HEALTH_PORT:-7860}"
 
@@ -21,26 +22,15 @@ export API_SERVER_HOST="127.0.0.1"
 export API_SERVER_PORT="${API_SERVER_PORT:-8642}"
 
 # Hermes Dashboard
-# 如果环境变量设置了 HERMES_DASHBOARD_PORT=9110，这里会使用 9110；
-# 未设置时才使用默认值 9119。
+# 环境变量设置 HERMES_DASHBOARD_PORT=9110 时会直接使用 9110。
 export HERMES_DASHBOARD_HOST="127.0.0.1"
 export HERMES_DASHBOARD_PORT="${HERMES_DASHBOARD_PORT:-9119}"
 
 # Web Shell
 export WEB_SHELL_PORT="${WEB_SHELL_PORT:-2222}"
 
-# 本项目保留 /root/.hermes 持久化语义，因此 Gateway 仍以 root 运行。
+# 允许 root 运行 Gateway
 export HERMES_ALLOW_ROOT_GATEWAY="${HERMES_ALLOW_ROOT_GATEWAY:-1}"
-
-# Gateway 退出后的自动拉起间隔（秒）
-export GATEWAY_RESTART_DELAY="${GATEWAY_RESTART_DELAY:-2}"
-
-case "$GATEWAY_RESTART_DELAY" in
-    ''|*[!0-9]*)
-        echo "错误：GATEWAY_RESTART_DELAY 必须是非负整数。"
-        exit 1
-        ;;
-esac
 
 
 # ============================================================
@@ -48,20 +38,30 @@ esac
 # ============================================================
 
 if [ "${SKIP_RESTORE:-}" = "1" ]; then
+
     echo "检测到 SKIP_RESTORE=1，跳过 Hermes 配置恢复与自动备份"
+
 else
+
     echo "开始 Hermes 历史配置恢复，并启动实时备份守护..."
 
     if /bz/sync_init.sh; then
-        nohup /bz/sync_daemon.sh >/tmp/hermes-sync.log 2>&1 &
+
+        nohup /bz/sync_daemon.sh \
+            >/tmp/hermes-sync.log \
+            2>&1 &
+
     else
+
         echo "提示：恢复机制不可用，继续启动 Hermes（不会启动同步守护）。"
+
     fi
+
 fi
 
 
 # ============================================================
-# 2) 用户自定义初始化脚本
+# 2) 用户自定义初始化
 # ============================================================
 
 if [ -x /root/bz-startup/main.sh ]; then
@@ -70,13 +70,14 @@ fi
 
 
 # ============================================================
-# 3) 启动远程访问
+# 3) 远程访问
 # ============================================================
 
 source /remote-access/start_remote_access.sh
 
-# 远程访问子进程已经拿到需要的环境变量；
-# 从后续 Health / Dashboard / Hermes 环境中移除凭证。
+
+# 远程访问相关进程已经拿到所需变量，
+# 后续不再传递这些敏感环境变量。
 unset \
     WEB_SHELL_PASSWORD \
     WEB_SHELL_HTTP_PASSWORD \
@@ -86,181 +87,87 @@ unset \
 
 
 # ============================================================
-# 4) Hermes Gateway API 配置
+# 4) Hermes Gateway API
 # ============================================================
 
 case "$API_SERVER_ENABLED" in
+
     1|true|TRUE|yes|YES|on|ON)
 
         if [ -z "${API_SERVER_KEY:-}" ]; then
 
-            API_SERVER_KEY="$(python - <<'PY'
+            API_SERVER_KEY="$(
+                python - <<'PY'
 import secrets
 print(secrets.token_hex(32))
 PY
-)"
+            )"
 
             export API_SERVER_KEY
 
             echo "Hermes Gateway API 已启用在 127.0.0.1:${API_SERVER_PORT}；未提供 API_SERVER_KEY，已生成本实例临时 key。"
+
         fi
 
         ;;
+
 esac
 
 
 # ============================================================
-# 5) 启动可选本地服务
+# 5) 可选本地服务
 # ============================================================
 #
-# 注意：
-# Health 不再从 start_local_services.sh 启动，
-# 这里只负责 Dashboard 等可选本地服务。
+# 这里只启动 Dashboard。
+# Health 已经不再由 start_local_services.sh 启动。
 # ============================================================
 
 source /runtime/start_local_services.sh
 
 
 # ============================================================
-# 6) Gateway Supervisor
+# 6) 启动 Gateway
 # ============================================================
 #
-# Gateway 不再是 PID 1。
+# 注意：
 #
-# Gateway：
-#   - 正常退出
-#   - 崩溃
-#   - 被 kill
+# Gateway 只启动这一次。
 #
-# 都会自动重新拉起。
+# 如果之后：
 #
-# 因此：
+#   - Gateway 崩溃
+#   - Gateway 被 kill
+#   - Gateway 手动停止
 #
-# Gateway restart != container restart
+# entrypoint 不会重新执行 hermes gateway run。
 #
 # ============================================================
 
-gateway_supervisor() {
-
-    local gateway_pid=""
-    local delay_pid=""
-    local rc=0
+echo "[entrypoint] 启动 Hermes Gateway（仅启动一次，不自动拉起）..."
 
 
-    # --------------------------------------------------------
-    # supervisor 收到 TERM / INT
-    # --------------------------------------------------------
-
-    stop_gateway_supervisor() {
-
-        trap - TERM INT
+"$@" \
+    > >(tee -a /tmp/hermes-gateway.log) \
+    2>&1 &
 
 
-        # 如果当前正在 restart delay，则结束 sleep
-        if [ -n "$delay_pid" ] \
-            && kill -0 "$delay_pid" 2>/dev/null
-        then
-            kill -TERM "$delay_pid" 2>/dev/null || true
-        fi
+GATEWAY_PID=$!
 
 
-        # 停止当前 Gateway
-        if [ -n "$gateway_pid" ] \
-            && kill -0 "$gateway_pid" 2>/dev/null
-        then
-
-            echo "[gateway-supervisor] 收到停止信号，正在停止 Gateway (pid=$gateway_pid)..."
-
-            kill -TERM "$gateway_pid" 2>/dev/null || true
-
-            wait "$gateway_pid" 2>/dev/null || true
-        fi
-
-
-        exit 0
-    }
-
-
-    trap stop_gateway_supervisor TERM INT
-
-
-    # --------------------------------------------------------
-    # Gateway 永久监管循环
-    # --------------------------------------------------------
-
-    while true; do
-
-        echo "[gateway-supervisor] 启动 Gateway..."
-
-
-        # Gateway 日志同时：
-        # 1. 输出到容器日志
-        # 2. 写入 /tmp/hermes-gateway.log
-        "$@" \
-            > >(tee -a /tmp/hermes-gateway.log) \
-            2>&1 &
-
-        gateway_pid=$!
-
-
-        echo "[gateway-supervisor] Gateway pid=$gateway_pid"
-
-
-        # ----------------------------------------------------
-        # 等待 Gateway 退出
-        # ----------------------------------------------------
-
-        if wait "$gateway_pid"; then
-            rc=0
-        else
-            rc=$?
-        fi
-
-
-        gateway_pid=""
-
-
-        echo "[gateway-supervisor] Gateway 已退出 (code=$rc)，${GATEWAY_RESTART_DELAY} 秒后重新启动。"
-
-
-        # ----------------------------------------------------
-        # restart delay
-        # ----------------------------------------------------
-
-        sleep "$GATEWAY_RESTART_DELAY" &
-        delay_pid=$!
-
-        wait "$delay_pid" 2>/dev/null || true
-
-        delay_pid=""
-
-    done
-}
+echo "[entrypoint] Gateway pid=$GATEWAY_PID"
 
 
 # ============================================================
-# 7) 启动 Gateway Supervisor
-# ============================================================
-
-gateway_supervisor "$@" &
-
-GATEWAY_SUPERVISOR_PID=$!
-
-
-echo "[entrypoint] Gateway supervisor pid=$GATEWAY_SUPERVISOR_PID"
-
-
-# ============================================================
-# 8) 启动 ModelScope Health
+# 7) 启动 Health
 # ============================================================
 #
 # Health 是容器生命周期锚点。
 #
-# Gateway 重启期间：
+# Gateway 即使退出：
 #
-#   health_server.py 仍然运行
-#   :7860 仍然可访问
-#   ModelScope 不会因为 Gateway 重启而认为容器死亡
+#   Health 仍然运行
+#   entrypoint 仍然运行
+#   容器仍然运行
 #
 # ============================================================
 
@@ -284,19 +191,16 @@ echo "[entrypoint] Health pid=$HEALTH_PID"
 
 
 # ============================================================
-# 9) PID 1 信号处理
+# 8) 容器停止信号处理
 # ============================================================
 #
 # entrypoint.sh 保持 PID 1。
 #
 # ModelScope / Docker 停止容器时：
 #
-# SIGTERM
-#    │
-#    ├── Gateway supervisor
-#    │      └── Gateway
-#    │
-#    └── Health
+#   SIGTERM
+#      ├── Gateway（如果还活着）
+#      └── Health
 #
 # ============================================================
 
@@ -305,21 +209,23 @@ shutdown() {
     local signal="${1:-TERM}"
 
 
-    # 防止重复进入 shutdown
+    # 防止重复触发
     trap - TERM INT
 
 
-    echo "[entrypoint] 收到 ${signal}，正在停止 Health 与 Gateway supervisor..."
+    echo "[entrypoint] 收到 ${signal}，正在停止 Health 与 Gateway..."
 
 
     # --------------------------------------------------------
-    # 停 Gateway supervisor
+    # 停止 Gateway
     # --------------------------------------------------------
 
-    if kill -0 "$GATEWAY_SUPERVISOR_PID" 2>/dev/null; then
+    if kill -0 "$GATEWAY_PID" 2>/dev/null; then
+
+        echo "[entrypoint] 停止 Gateway (pid=$GATEWAY_PID)..."
 
         kill -TERM \
-            "$GATEWAY_SUPERVISOR_PID" \
+            "$GATEWAY_PID" \
             2>/dev/null \
             || true
 
@@ -327,10 +233,12 @@ shutdown() {
 
 
     # --------------------------------------------------------
-    # 停 Health
+    # 停止 Health
     # --------------------------------------------------------
 
     if kill -0 "$HEALTH_PID" 2>/dev/null; then
+
+        echo "[entrypoint] 停止 Health (pid=$HEALTH_PID)..."
 
         kill -TERM \
             "$HEALTH_PID" \
@@ -341,11 +249,11 @@ shutdown() {
 
 
     # --------------------------------------------------------
-    # 等待退出
+    # 等待进程退出
     # --------------------------------------------------------
 
     wait \
-        "$GATEWAY_SUPERVISOR_PID" \
+        "$GATEWAY_PID" \
         2>/dev/null \
         || true
 
@@ -368,43 +276,62 @@ trap 'shutdown INT' INT
 
 
 # ============================================================
-# 10) Health 决定容器生命周期
+# 9) Health 决定容器生命周期
 # ============================================================
 #
-# 这里故意只 wait Health。
+# 这里只等待 Health。
 #
-# 不 wait Gateway：
-# Gateway 的生命周期由 gateway_supervisor 管理。
+# 不等待 Gateway。
 #
-# Gateway 挂掉：
-#   → supervisor 重启 Gateway
-#   → 容器继续运行
+# 所以：
 #
-# Health 挂掉：
-#   → 停 Gateway
-#   → entrypoint 退出
-#   → 容器退出
+# Gateway exit
+#     ↓
+# 不重启 Gateway
+#     ↓
+# Health 仍然运行
+#     ↓
+# entrypoint 仍然运行
+#     ↓
+# 容器保持运行
+#
+#
+# 只有 Health 退出：
+#
+# Health exit
+#     ↓
+# 停止仍存活的 Gateway
+#     ↓
+# entrypoint 退出
+#     ↓
+# 容器退出
 #
 # ============================================================
 
 if wait "$HEALTH_PID"; then
+
     HEALTH_RC=0
+
 else
+
     HEALTH_RC=$?
+
 fi
 
 
-echo "[entrypoint] Health server 已退出 (code=$HEALTH_RC)，停止 Gateway supervisor 并结束容器。"
+echo "[entrypoint] Health server 已退出 (code=$HEALTH_RC)，准备结束容器。"
 
 
 # ============================================================
-# Health 死亡后停止 Gateway Supervisor
+# Health 退出后清理 Gateway
 # ============================================================
 
-if kill -0 "$GATEWAY_SUPERVISOR_PID" 2>/dev/null; then
+if kill -0 "$GATEWAY_PID" 2>/dev/null; then
+
+    echo "[entrypoint] Health 已退出，停止 Gateway (pid=$GATEWAY_PID)..."
 
     kill -TERM \
-        "$GATEWAY_SUPERVISOR_PID" \
+        "$GATEWAY_PID" \
         2>/dev/null \
         || true
 
@@ -412,10 +339,9 @@ fi
 
 
 wait \
-    "$GATEWAY_SUPERVISOR_PID" \
+    "$GATEWAY_PID" \
     2>/dev/null \
     || true
-
 
 
 exit "$HEALTH_RC"
