@@ -81,11 +81,9 @@ ARG SQLITE_AUTOCONF_VERSION=3530400
 RUN curl -fL --retry 3 \
         "https://www.sqlite.org/2026/sqlite-tools-linux-x64-${SQLITE_AUTOCONF_VERSION}.zip" \
         -o /tmp/sqlite-tools.zip \
-    && /usr/local/bin/python3 -c "import zipfile; zipfile.ZipFile('/tmp/sqlite-tools.zip').extractall('/tmp/sqlite-tools')" \
-    && install -m 0755 \
-        "/tmp/sqlite-tools/sqlite-tools-linux-x64-${SQLITE_AUTOCONF_VERSION}/sqlite3" \
-        /usr/local/bin/sqlite3 \
-    && rm -rf /tmp/sqlite-tools.zip /tmp/sqlite-tools \
+    && /usr/local/bin/python3 -c "import os, shutil, zipfile; z = zipfile.ZipFile('/tmp/sqlite-tools.zip'); name = next(n for n in z.namelist() if os.path.basename(n) == 'sqlite3'); src = z.open(name); dst = open('/usr/local/bin/sqlite3', 'wb'); shutil.copyfileobj(src, dst); dst.close(); src.close(); print('extracted', name)" \
+    && chmod 0755 /usr/local/bin/sqlite3 \
+    && rm -f /tmp/sqlite-tools.zip \
     && sqlite3 --version
 
 
