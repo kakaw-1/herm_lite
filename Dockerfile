@@ -59,9 +59,34 @@ RUN apt-get -o Acquire::Retries=3 update \
         gnupg \
         sudo \
         openssh-server \
-        sqlite3 \
         xz-utils \
     && rm -rf /var/lib/apt/lists/*
+
+
+# ============================================================
+# sqlite3 CLI（必须与上游替换后的 libsqlite3 版本一致）
+#
+# 上游镜像把 /usr/local/lib/libsqlite3.so.0 换成自编的 3.53.4，
+# 而 Debian trixie 的 sqlite3 CLI 是 3.46.1 —— 两者 header/library
+# 版本不匹配，CLI 直接报 "SQLite header and source version mismatch"
+# 并以 1 退出。snap_daily.sh 用 sqlite3 对 state.db 做在线冷备，
+# 装发行版 CLI 会让备份链第一天就断。
+#
+# 这里改用 sqlite.org 官方静态构建的 sqlite-tools（自带库，无外部依赖），
+# 版本与上游 lib 对齐到同一个 autoconf 版本号。
+# ============================================================
+
+ARG SQLITE_AUTOCONF_VERSION=3530400
+
+RUN curl -fL --retry 3 \
+        "https://www.sqlite.org/2026/sqlite-tools-linux-x64-${SQLITE_AUTOCONF_VERSION}.zip" \
+        -o /tmp/sqlite-tools.zip \
+    && /usr/local/bin/python3 -c "import zipfile; zipfile.ZipFile('/tmp/sqlite-tools.zip').extractall('/tmp/sqlite-tools')" \
+    && install -m 0755 \
+        "/tmp/sqlite-tools/sqlite-tools-linux-x64-${SQLITE_AUTOCONF_VERSION}/sqlite3" \
+        /usr/local/bin/sqlite3 \
+    && rm -rf /tmp/sqlite-tools.zip /tmp/sqlite-tools \
+    && sqlite3 --version
 
 
 # ============================================================
@@ -195,7 +220,18 @@ RUN set -eu; \
         || { echo "missing tini-real"; exit 1; }; \
     rclone version | head -1; \
     inotifywait --help 2>&1 | head -1; \
-    sqlite3 --version; \
+    sqlite3 --version \
+        || { echo "sqlite3 CLI broken (header/library mismatch?)"; exit 1; }; \
+    /usr/local/bin/python3 -c "\
+import sqlite3, sys; \
+v = tuple(map(int, sqlite3.sqlite_version.split('.'))); \
+print('python sqlite', sqlite3.sqlite_version); \
+sys.exit('python sqlite too old for the WAL-reset fix') if v < (3, 51, 3) else None; \
+db = sqlite3.connect(':memory:'); \
+db.execute(\"CREATE VIRTUAL TABLE t USING fts5(c, tokenize='trigram')\"); \
+db.execute(\"INSERT INTO t VALUES ('hermes')\"); \
+sys.exit('FTS5 trigram self-test failed') if db.execute(\"SELECT count(*) FROM t WHERE t MATCH 'erm'\").fetchone()[0] != 1 else None; \
+db.close(); print('FTS5 trigram OK')"; \
     echo "glue layer OK"
 
 
