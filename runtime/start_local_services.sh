@@ -147,11 +147,10 @@ start_dashboard() {
 
 
             if hermes dashboard \
-                --host 0.0.0.0 \
+                --host 127.0.0.1 \
                 --port "$HERMES_DASHBOARD_PORT" \
                 --no-open \
-                --skip-build \
-                --insecure
+                --skip-build
             then
 
                 rc=0

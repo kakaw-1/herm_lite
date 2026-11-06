@@ -1,4 +1,20 @@
-FROM python:3.11-slim-bookworm
+# ============================================================
+# Hermes Lite — glue layer on top of the official Hermes Agent image
+#
+# 从 v2026.8.3 升到 v0.23.0 不是版本号变化，而是运行时架构换血：
+#   - 上游改用 debian trixie + PM 自管 Python 3.14 + sealed venv
+#     + Node 26 + pinned Chromium + 预构建 web_dist / webapp bundle
+#   - 47 条依赖里 46 条带 python_version >= '3.14' 标记，3.11 上解析为空
+#     => 无法就地升级，只能换基底重建
+#
+# 本仓库只叠 glue：
+#   ttyd / cloudflared / rclone / inotify-tools / sshd / sqlite3-cli / tini
+#   数据仍留在 /root/.hermes（不跟随上游 /opt/data + UID 10000 非 root 用户）
+#   ENTRYPOINT 覆盖为 /entrypoint.sh，tini 做 PID 1 回收孤儿进程
+#   （上游靠 s6-overlay 做这件事，我们不用 s6）
+# ============================================================
+
+FROM nousresearch/hermes-agent:v0.23.0
 
 
 # ============================================================
@@ -8,18 +24,31 @@ FROM python:3.11-slim-bookworm
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     HOME=/root \
-    PATH="/opt/hermes/.venv/bin:/root/.local/bin:${PATH}"
+    HERMES_HOME=/root/.hermes \
+    HERMES_ALLOW_ROOT_GATEWAY=1 \
+    HERMES_DOCKER_EXEC_AS_ROOT=1
+
+
+# 上游 PATH 把 /opt/hermes/bin 放在最前面 —— 那是 root 降权 shim
+# （setuidgid hermes, UID 10000），以 root 运行时会把进程降到 UID 10000，
+# 读不了 /root/.hermes（0700）。这里把 venv 的可执行目录提到最前，
+# 并移除 /opt/hermes/bin，让 `hermes` 直接解析到 sealed venv 的入口。
+ENV PATH="/opt/hermes/.venv/bin:/root/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 WORKDIR /opt/hermes
 
 
 # ============================================================
-# 系统依赖
+# 系统依赖（glue 层）
+#
+# 上游镜像已自带：ca-certificates curl git procps xz-utils gcc g++ make
+# chromium 运行库、node 26、npm、ffmpeg、ripgrep、python3.14
+# 这里只补本部署特有的：备份链(rclone/inotify-tools/gnupg)、远程访问
+# (openssh-server)、Web Shell 提权(sudo)、sqlite3 CLI 冷备 state.db
 # ============================================================
 
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=3 update \
+    && apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
         ca-certificates \
         curl \
         git \
@@ -28,9 +57,29 @@ RUN apt-get update \
         rclone \
         inotify-tools \
         gnupg \
-        build-essential \
         sudo \
+        openssh-server \
+        sqlite3 \
+        xz-utils \
     && rm -rf /var/lib/apt/lists/*
+
+
+# ============================================================
+# tini —— PID 1 孤儿进程回收
+#
+# 上游用 s6-overlay 的 /init 做 PID 1；我们用 tini 覆盖 ENTRYPOINT，
+# 只保留"回收孤儿进程 + 转发信号"这一项能力。
+# 上游在 /usr/bin/tini 放了一个 s6 转发 shim，所以真 tini 放独立路径，
+# 避免与 apt 的 tini 包 / 上游 shim 抢同一个文件名。
+# ============================================================
+
+ARG TINI_VERSION=v0.19.0
+
+RUN curl -fL --retry 3 \
+        "https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-static" \
+        -o /usr/local/bin/tini-real \
+    && chmod 0755 /usr/local/bin/tini-real \
+    && /usr/local/bin/tini-real --version
 
 
 # ============================================================
@@ -47,98 +96,7 @@ RUN curl -fL --retry 3 \
 
 
 # ============================================================
-# SQLite
-#
-# Hermes 需要：
-# - SQLite >= 3.51.3
-# - FTS5
-# ============================================================
-
-ARG SQLITE_VERSION=3530400
-
-RUN curl -fL --retry 3 \
-    "https://www.sqlite.org/2026/sqlite-autoconf-${SQLITE_VERSION}.tar.gz" \
-    -o /tmp/sqlite.tar.gz \
-    && mkdir -p /tmp/sqlite-src \
-    && tar -xzf /tmp/sqlite.tar.gz \
-        -C /tmp/sqlite-src \
-        --strip-components=1 \
-    && cd /tmp/sqlite-src \
-    && CPPFLAGS="-DSQLITE_ENABLE_FTS5" \
-        ./configure --prefix=/usr/local \
-    && make -j"$(nproc)" \
-    && make install \
-    && ldconfig \
-    && rm -rf \
-        /tmp/sqlite.tar.gz \
-        /tmp/sqlite-src
-
-
-# 确保 Python 优先加载 /usr/local/lib 下的新 SQLite
-ENV LD_LIBRARY_PATH="/usr/local/lib"
-
-
-# ============================================================
-# SQLite 构建验证
-# ============================================================
-
-RUN python - <<'PY'
-import sqlite3
-
-print("Linked SQLite:", sqlite3.sqlite_version)
-
-version = tuple(
-    map(int, sqlite3.sqlite_version.split("."))
-)
-
-assert version >= (3, 51, 3), (
-    f"SQLite version too old: {sqlite3.sqlite_version}"
-)
-
-con = sqlite3.connect(":memory:")
-
-compile_options = {
-    row[0]
-    for row in con.execute("PRAGMA compile_options")
-}
-
-print(
-    "FTS5 compile option:",
-    "ENABLE_FTS5" in compile_options,
-)
-
-assert "ENABLE_FTS5" in compile_options, (
-    "SQLite was built without ENABLE_FTS5"
-)
-
-con.execute(
-    "CREATE VIRTUAL TABLE fts5_test "
-    "USING fts5(content)"
-)
-
-con.execute(
-    "INSERT INTO fts5_test(content) "
-    "VALUES ('Hermes SQLite FTS5 test')"
-)
-
-result = con.execute(
-    "SELECT content "
-    "FROM fts5_test "
-    "WHERE fts5_test MATCH 'Hermes'"
-).fetchone()
-
-assert result is not None
-
-print("SQLite FTS5: OK")
-PY
-
-
-# ============================================================
-# cloudflared
-# ============================================================
-#
-# 当前使用 latest。
-# 如果以后追求完全可复现构建，建议改成固定版本。
+# cloudflared（quick tunnel / named tunnel）
 # ============================================================
 
 RUN curl -fL --retry 3 \
@@ -150,6 +108,10 @@ RUN curl -fL --retry 3 \
 
 # ============================================================
 # uv
+#
+# 上游镜像的依赖由 PM 自管（pm/lock.json 里的 uv），与这里无关。
+# 保留 /root/.local/bin/uv 是为了让既有用户脚本里写死的路径不失效
+# （resin_boot.sh 等按 /root/.local/bin/uv 调用）。
 # ============================================================
 
 ARG UV_VERSION=0.5.11
@@ -159,68 +121,19 @@ RUN curl -LsSf \
     | sh
 
 
-# ============================================================
-# Hermes Agent
-# ============================================================
-
-ARG HERMES_VERSION=v2026.8.3
-
-RUN git init . \
-    && git remote add origin \
-        https://github.com/NousResearch/hermes-agent.git \
-    && git fetch \
-        --depth 1 \
-        origin "${HERMES_VERSION}" \
-    && git checkout --detach FETCH_HEAD \
-    && uv sync \
-        --frozen \
-        --no-install-project \
-        --extra all \
-        --extra messaging \
-    && uv pip install \
-        --no-cache-dir \
-        --no-deps \
-        -e .
-
-# 让普通 Web Shell 用户和 root 都能直接执行
+# 与旧镜像一致：root 和普通 Web Shell 用户都能直接执行
 RUN ln -sf /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes
-# ============================================================
-# Node.js 22
-#
-# Hermes Dashboard 前端构建需要 Node/npm。
-# ============================================================
-
-RUN curl -fsSL \
-    https://deb.nodesource.com/setup_22.x \
-    | bash - \
-    && apt-get update \
-    && apt-get install -y \
-        --no-install-recommends \
-        nodejs \
-    && rm -rf /var/lib/apt/lists/* \
-    && node --version \
-    && npm --version
-
-
-# ============================================================
-# Hermes Dashboard 前端预构建
-#
-# ============================================================
-
-WORKDIR /opt/hermes
-
-RUN cd web \
-    && npm install \
-    && npm run build
 
 
 # ============================================================
 # 备份 / 恢复
+#
+# bz/sync_init.sh    开机从 /mnt/workspace/root 反向恢复
+# bz/sync_daemon.sh  实时 rclone 同步 + 每日 05:00 远端快照（防抖版）
+# bz/rules.txt       rclone 过滤规则（热文件排除 + v0.23 PM 世代排除）
 # ============================================================
 
 COPY bz/ /bz/
-
-# 如果你仍然需要 bz-startup 才保留。
 COPY bz-startup/ /root/bz-startup/
 
 
@@ -237,9 +150,8 @@ COPY entrypoint.sh /entrypoint.sh
 # ============================================================
 # 权限 + Shell 语法检查
 #
-# 这个非常重要：
-# 像刚才 sync_init.sh 那种多一个 "\" 的问题，
-# 会直接在 GitHub Actions 构建阶段被发现。
+# 多一个残缺续行符之类的问题，会在构建阶段被发现，
+# 而不是等到容器起不来。
 # ============================================================
 
 RUN chmod +x \
@@ -256,13 +168,44 @@ RUN chmod +x \
     && bash -n /runtime/start_local_services.sh \
     && bash -n /remote-access/start_remote_access.sh \
     && bash -n /entrypoint.sh \
+    && python3 -m py_compile /health/health_server.py \
     && mkdir -p \
         /root/.hermes \
-        /root/Desktop
+        /root/Desktop \
+        /opt/data
+
+
+# ============================================================
+# 构建期断言
+#
+# 这里只做"看一眼就知道不对"的检查，不执行 hermes 本体
+# （镜像里没有 config，执行子命令可能因缺少配置退出非零）。
+# ============================================================
+
+RUN set -eu; \
+    /usr/local/bin/python3 --version | grep -qE '3\.14' \
+        || { echo "Python is not 3.14 — wrong base image"; exit 1; }; \
+    test -x /opt/hermes/.venv/bin/hermes \
+        || { echo "missing /opt/hermes/.venv/bin/hermes"; exit 1; }; \
+    test -d /opt/hermes/hermes_cli/web_dist \
+        || { echo "missing prebuilt dashboard web_dist"; exit 1; }; \
+    test -d /opt/hermes/apps/desktop/dist-webapp \
+        || { echo "missing prebuilt webapp bundle"; exit 1; }; \
+    test -x /usr/local/bin/tini-real \
+        || { echo "missing tini-real"; exit 1; }; \
+    rclone version | head -1; \
+    inotifywait --help 2>&1 | head -1; \
+    sqlite3 --version; \
+    echo "glue layer OK"
 
 
 # ============================================================
 # Ports
+#
+# 7860  魔塔健康检查 / 状态页（唯一对外端口）
+# 9119  dashboard（loopback，走隧道）
+# 9120  webapp（loopback，v0.23 新增）
+# 2222  ttyd（loopback，走隧道）
 # ============================================================
 
 EXPOSE 7860
@@ -270,8 +213,11 @@ EXPOSE 7860
 
 # ============================================================
 # Startup
+#
+# tini 作为 PID 1：转发 SIGTERM 给 entrypoint，并回收 gateway /
+# browser / MCP 这类子进程留下的孤儿，避免僵尸堆积。
 # ============================================================
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/tini-real", "--", "/entrypoint.sh"]
 
 CMD ["hermes", "gateway", "run"]

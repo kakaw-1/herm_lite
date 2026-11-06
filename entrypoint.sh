@@ -32,6 +32,10 @@ export WEB_SHELL_PORT="${WEB_SHELL_PORT:-2222}"
 # 允许 root 运行 Gateway
 export HERMES_ALLOW_ROOT_GATEWAY="${HERMES_ALLOW_ROOT_GATEWAY:-1}"
 
+# Hermes 数据目录（v0.23.0 起上游默认 /opt/data + UID 10000；
+# 本部署继续用 /root/.hermes，root 运行，tar 备份路径保持不变）
+export HERMES_HOME="${HERMES_HOME:-/root/.hermes}"
+
 
 # ============================================================
 # 1) 恢复 Hermes 数据，并启动实时备份
@@ -57,6 +61,75 @@ else
 
     fi
 
+fi
+
+
+# ============================================================
+# 1b) 镜像升级对齐（v0.23.0）
+#
+# 上游 Docker 镜像把这三件事放在 docker/stage2-hook.sh 里，但它假定
+# HERMES_HOME=/opt/data + UID 10000 + s6 监督树，直接调用会 usermod /
+# chown -R 把 /root/.hermes 的属主改成 hermes(10000)。
+# 这里只复刻必需的三个动作，跳过 chown / UID 重映射 / 目录 seed：
+#
+#   a) config schema 迁移（33 -> 52），迁移器自己会先备份到 backups/config/
+#   b) PM 依赖世代与 sealed venv 对齐（旧 tar 里的依赖事实不能带进来）
+#   c) 内置技能同步（只增/只更新未被用户改过的，不碰自建技能）
+#
+# 任何一步失败都只记日志 —— 新容器必须能起来。
+# ============================================================
+
+HB=/opt/hermes
+HB_PY="$HB/.venv/bin/python"
+
+if [ -x "$HB_PY" ]; then
+
+    # --- a) config schema 迁移 ---
+    if [ -f "$HERMES_HOME/config.yaml" ]; then
+
+        echo "[entrypoint] config schema 迁移检查..."
+
+        "$HB_PY" "$HB/scripts/docker_config_migrate.py" \
+            || echo "[entrypoint] WARN: config 迁移失败，继续启动"
+
+    else
+
+        echo "[entrypoint] 未找到 $HERMES_HOME/config.yaml，跳过 config 迁移。"
+    fi
+
+    # --- b) PM 依赖世代对齐 ---
+    echo "[entrypoint] PM 依赖世代对齐..."
+
+    "$HB_PY" -c "
+from pathlib import Path
+from hermes_cli.runtime_state import collect_generations
+from pm.environments import install_state_dir
+from pm.recovery import refresh_dependencies
+from pm.runtime import collect_runtime_generations
+
+root = Path('$HB')
+
+print('[entrypoint] dependency environment:', refresh_dependencies(root))
+print(
+    '[entrypoint] collected',
+    len(
+        collect_generations(root)
+        + collect_runtime_generations(install_state_dir(root) / 'pm-runtime')
+    ),
+    'unused dependency generations',
+)
+" || echo "[entrypoint] WARN: 依赖对齐失败，回落到镜像自带 sealed venv"
+
+    # --- c) 内置技能同步 ---
+    if [ -d "$HB/skills" ]; then
+
+        "$HB_PY" "$HB/tools/skills_sync.py" \
+            || echo "[entrypoint] WARN: skills_sync 失败，继续启动"
+    fi
+
+else
+
+    echo "[entrypoint] WARN: 未找到 $HB_PY，跳过镜像对齐步骤。"
 fi
 
 

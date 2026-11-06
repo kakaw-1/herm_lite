@@ -1,19 +1,60 @@
-# 优先排除的目录
-- /.hermes/hermes-agent/**
+# ============================================================
+# Hermes 配置备份 —— rclone filter（首条命中即生效，顺序不可调换）
+# 结构：先"永不备份" → 再"热文件/缓存排除" → 再"白名单" → 最后"- **"
+# ============================================================
+
+# --- 1) 永不备份 ---
 - .git/**
 - .venv/**
 - venv/**
 - node_modules/**
-# 需要同步的目录
-+ /.openclaw/**
+
+# --- 2) 热文件与易失缓存（必须在白名单之前！）---
+# 日志：源文件在传输期间持续追加，rclone 必然 md5 不一致 / size changed
+- *.log
+- *.log.[0-9]
+# SQLite WAL/SHM：随事务持续改写，无法稳定快照（日快照走 tar，同样排除）
+- *-wal
+- *-shm
+# 原子写残留 / cron 心跳
+- *.tmp
+- .*.tmp
+# rclone 自己生成的软链占位文件：目标端 chmod 必失败
+- *.rclonelink
+# opencode2api 的模型探测缓存：运行中周期性改写，可再生
+- *.availability.json
+# 浏览器 profile 的纯缓存目录（Cookie / 登录态 / History 不在其内，仍会备份）
+- *Cache/**
+- *Cache
+- **/IndexedDB/**
+- **/BrowserMetrics/**
+- **/Service Worker/**
+- **/Singleton*
+# 会话类工具的纯缓存（本机为空占位；若将来有内容也只备配置不备缓存）
+- .openclaw/*cache*/
+- .codex/*cache*/
+- .claude/*cache*/
+- .openclaw/**/*.log
+- .codex/**/*.log
+- .claude/**/*.log
+
+# --- v0.23.0 新增的可重建物（必须在白名单之前）---
+# PM 依赖世代：每代含独立 venv，几百 MB，entrypoint 每次启动自动对齐重建。
+# 不排除的话首次同步会把它整个推上 ossfs，单次同步从 10-40 秒变分钟级。
+- .hermes/installs/**
+- .hermes/environments/**
+# 浏览器 profile：Chromium 高频改写（Cache / History / GPUCache 每秒都在动），
+# 属于典型热文件。排除后浏览器登录态不备份，需要时重新登录即可。
+- .hermes/browser-profile/**
+# 引擎日志（agent.log / errors.log / gateway.log / update_receipts）
+- .hermes/logs/**
+
+# --- 3) 需要同步 ---
 + /Desktop/**
-+ /.codex/**
-+ /.claude/**
 + /bz-startup/**
 + /.hermes/**
-
-# 需要同步的文件
++ /.hermes/skills/autonomous-ai-agents/hermes-agent/**
 + /.zsh_history
 
-# 排除其余所有
-- *
+# --- 4) 其余全排除 ---
+- **

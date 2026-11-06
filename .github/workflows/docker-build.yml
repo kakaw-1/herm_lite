@@ -26,9 +26,13 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE }}
+          # v0.23.0 升级：这次构建只出 v0.23.0 和 sha-<commit>，
+          # 不打 latest —— 验证通过后再手动把 latest 指过来。
+          # 这样 GHCR 上的 latest 仍停留在 353d055（v2026.8.3），
+          # 魔塔那边换 tag 即可一键回滚。
           tags: |
             type=sha
-            type=raw,value=latest
+            type=raw,value=v0.23.0
       - uses: docker/build-push-action@v6
         with:
           context: .
